@@ -12,81 +12,110 @@ _stop_event = threading.Event()
 
 # Placeholder for functions that will be called by the scheduler
 # These would typically interact with gemini_client and email_sender
+from gemini_client import GeminiClient # Import at module level
+from email_sender import EmailSender # Import at module level
 
-def _placeholder_task_function(task_id, prompt, search_internet, email_to, api_key, smtp_config):
+def _task_execution_function(task_id, prompt, search_internet, email_to, api_key, smtp_config):
     """
     This function is what the scheduler will execute for each task.
-    It needs to:
     1. Get response from Gemini (using gemini_client)
     2. Send email with the response (using email_sender)
     """
-    print(f"Scheduler: Executing task {task_id} at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  Prompt: {prompt}")
-    print(f"  Search Internet: {search_internet}")
-    print(f"  Email To: {email_to}")
-    print(f"  API Key used: {'*' * len(api_key) if api_key else 'None'}")
+    print(f"Scheduler INFO: Executing task '{task_id}' at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Task Details - Prompt: '{prompt}', Search Internet: {search_internet}, Email To: {email_to}")
     
-    # --- Simulate Gemini Interaction ---
-    # In real implementation, you'd import and use GeminiClient
-    # from gemini_client import GeminiClient
-    # gemini = GeminiClient(api_key=api_key)
-    # response = gemini.get_gemini_response(prompt, search_internet)
-    response = f"Simulated Gemini response for '{prompt}' obtained at {time.strftime('%H:%M:%S')}."
-    if search_internet:
-        response = f"(Simulated search done) {response}"
-    print(f"  Simulated Gemini Response: {response}")
+    # --- Gemini Interaction ---
+    gemini_interaction_successful = False
+    response = ""
+    try:
+        print(f"Scheduler INFO: Task '{task_id}' - Initializing GeminiClient.")
+        gemini = GeminiClient(api_key=api_key)
+        print(f"Scheduler INFO: Task '{task_id}' - Requesting response from Gemini.")
+        response = gemini.get_gemini_response(prompt, search_internet)
+
+        if response and not response.startswith("Error:"):
+            gemini_interaction_successful = True
+            print(f"Scheduler SUCCESS: Task '{task_id}' - Successfully received response from Gemini: '{response[:100]}...'")
+        else:
+            # GeminiClient already logs its own errors. This log indicates the scheduler's perspective.
+            print(f"Scheduler ERROR: Task '{task_id}' - Failed to get a valid response from Gemini. Received: '{response}'")
+            # Optional: could set a default error response for the email if needed
+            # response = "Error: Could not retrieve response from Gemini."
+    except Exception as e_gemini:
+        print(f"Scheduler CRITICAL: Task '{task_id}' - Exception during Gemini interaction: {e_gemini}")
+        traceback.print_exc()
+        response = f"Error: Exception occurred while contacting Gemini: {e_gemini}"
+
+    if not gemini_interaction_successful:
+        # If Gemini interaction failed, we might still want to send an email notification
+        # or simply log and not send an email. For now, let's assume we send an email
+        # with the error message if an email address is configured.
+        print(f"Scheduler WARNING: Task '{task_id}' - Proceeding to email step despite Gemini interaction failure.")
+        # If response is empty due to an exception, ensure it has some content.
+        if not response: response = "Error: Unknown issue during Gemini interaction, no response obtained."
 
     # --- Email Sending ---
-    if smtp_config and smtp_config.get("server") and smtp_config.get("user"): # Basic check
+    email_sent_successfully = False
+    if not email_to:
+        print(f"Scheduler INFO: Task '{task_id}' - No recipient email configured. Skipping email send.")
+    elif not (smtp_config and smtp_config.get("server") and smtp_config.get("user")):
+        print(f"Scheduler WARNING: Task '{task_id}' - SMTP configuration incomplete. Skipping email send. Config: {smtp_config}")
+    else:
         try:
-            from email_sender import EmailSender # Import here to avoid circular deps if any at module level
-
+            print(f"Scheduler INFO: Task '{task_id}' - Initializing EmailSender for {smtp_config.get('user')}@{smtp_config.get('server')}.")
             sender = EmailSender(
                 smtp_server=smtp_config["server"],
-                smtp_port=int(smtp_config["port"]), # Ensure port is int
+                smtp_port=int(smtp_config["port"]),
                 smtp_user=smtp_config["user"],
                 smtp_password=smtp_config["password"],
-                use_tls=smtp_config.get("use_tls", True)
+                use_tls=smtp_config.get("use_tls", True),
+                use_ssl=smtp_config.get("use_ssl", False) # Pass the new SSL setting
             )
-            subject = f"Scheduled Gemini Response: {prompt[:30]}..."
+            subject_prefix = "Gemini Task Result"
+            if not gemini_interaction_successful:
+                 subject_prefix = "Gemini Task Alert - Error"
+            subject = f"{subject_prefix}: {prompt[:30]}..."
 
-            # For now, sending HTML and Text as the same.
-            # Could refine to generate a simpler text version.
-            body_html = f"<html><body><h1>Gemini Task Result</h1><p><b>Prompt:</b> {prompt}</p><hr><p>{response.replace('n', '<br>')}</p></body></html>"
-            body_text = f"Gemini Task Result\nPrompt: {prompt}\n\nResponse:\n{response}"
+            body_html = f"<html><body><h1>{subject_prefix}</h1><p><b>Task ID:</b> {task_id}</p><p><b>Prompt:</b> {prompt}</p><hr><h3>Response:</h3><p>{response.replace('n', '<br>')}</p></body></html>"
+            body_text = f"{subject_prefix}\nTask ID: {task_id}\nPrompt: {prompt}\n\nResponse:\n{response}"
 
-            print(f"  Attempting to send email to {email_to} via {smtp_config['user']}@{smtp_config['server']}...")
+            print(f"Scheduler INFO: Task '{task_id}' - Attempting to send email to {email_to} with subject '{subject}'.")
             if sender.send_email(email_to, subject, body_html, body_text):
-                print(f"  Email successfully sent to {email_to}.")
-                # Update last run details in config after successful send
-                try:
-                    # Local import for config_manager to avoid potential top-level circular dependencies
-                    # and to ensure it's only imported when needed for this operation.
-                    import config_manager
-                    current_time_iso = datetime.datetime.now().isoformat() # Get current time in ISO format
-                    # Save the Gemini response and the time of successful sending
-                    if config_manager.update_task_last_run_details(task_id, response, current_time_iso):
-                        print(f"  Task {task_id}: Last run details (response/time) updated in config.")
-                    else:
-                        # This might happen if the task was deleted from config just before this update.
-                        print(f"  Task {task_id}: Failed to update last run details in config (task ID not found?).")
-                except ImportError:
-                     print("  Scheduler Error: ConfigManager module not found. Cannot update task details.")
-                except Exception as e_conf: # Catch any other errors during config update
-                    print(f"  Scheduler Error: An unexpected error occurred while updating task details in config for {task_id}: {e_conf}")
+                print(f"Scheduler SUCCESS: Task '{task_id}' - Email successfully sent to {email_to}.")
+                email_sent_successfully = True
             else:
-                # Email sending failed as per EmailSender's return value
-                print(f"  Task {task_id}: Failed to send email to {email_to} (EmailSender returned false). Check EmailSender logs.")
-        except ImportError: # For EmailSender module itself
-            print("  Scheduler Error: EmailSender module not found. Cannot send email.")
-        except KeyError as e:
-            print(f"  Email sending skipped: Missing key in smtp_config: {e}. Full config: {smtp_config}")
-        except Exception as e:
-            print(f"  An error occurred during email sending: {e}")
-    else:
-        print(f"  Email sending skipped: SMTP configuration is incomplete or missing. Config: {smtp_config}")
+                # EmailSender logs specific errors. This is the scheduler's summary.
+                print(f"Scheduler ERROR: Task '{task_id}' - Failed to send email to {email_to} (EmailSender returned false). Check EmailSender logs.")
 
-    print("--- Task execution finished ---")
+        except ImportError: # Should not happen if EmailSender imported at module level
+            print(f"Scheduler CRITICAL: Task '{task_id}' - EmailSender module not found during task execution. This is unexpected.")
+        except KeyError as e_key:
+            print(f"Scheduler ERROR: Task '{task_id}' - Missing key in smtp_config: {e_key}. Cannot send email.")
+        except Exception as e_email:
+            print(f"Scheduler CRITICAL: Task '{task_id}' - An unexpected error occurred during email sending: {e_email}")
+            traceback.print_exc()
+
+    # --- Update Config with Last Run Details (if email was intended and successful, or even if Gemini failed but email was attempted) ---
+    # We update config if the Gemini part produced a response (even an error string)
+    # and an email attempt was made (or would have been made if configured).
+    # This helps track that the task ran, regardless of full success.
+    if response: # If there's any response (success or error string from Gemini part)
+        try:
+            import config_manager # Local import for safety, though less critical now
+            current_time_iso = datetime.datetime.now().isoformat()
+            # Save the Gemini response (which might be an error message) and the time
+            print(f"Scheduler INFO: Task '{task_id}' - Attempting to update last run details in config.")
+            if config_manager.update_task_last_run_details(task_id, response, current_time_iso):
+                print(f"Scheduler INFO: Task '{task_id}' - Last run details (response/time) updated in config.")
+            else:
+                print(f"Scheduler WARNING: Task '{task_id}' - Failed to update last run details in config (task ID not found or save error).")
+        except ImportError:
+            print(f"Scheduler ERROR: Task '{task_id}' - ConfigManager module not found. Cannot update task details.")
+        except Exception as e_conf:
+            print(f"Scheduler ERROR: Task '{task_id}' - Unexpected error updating task details in config: {e_conf}")
+            traceback.print_exc()
+
+    print(f"Scheduler INFO: --- Task '{task_id}' execution finished ---")
 
 
 def _parse_interval(interval_str):
@@ -151,7 +180,7 @@ def add_task(task_id, prompt, interval_str, search_internet, email_to, api_key, 
         # Using a lambda to pass arguments to the task function
         # Each job needs its own set of arguments captured at the time of scheduling
         job_instance = parsed_job.do(
-            _placeholder_task_function, 
+            _task_execution_function,
             task_id=task_id,
             prompt=prompt, 
             search_internet=search_internet, 

@@ -4,13 +4,23 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 class EmailSender:
-    def __init__(self, smtp_server, smtp_port, smtp_user, smtp_password, use_tls=True):
+    def __init__(self, smtp_server, smtp_port, smtp_user, smtp_password, use_tls=True, use_ssl=False):
         self.smtp_server = smtp_server
         self.smtp_port = smtp_port
         self.smtp_user = smtp_user
         self.smtp_password = smtp_password # Should be handled securely
-        self.use_tls = use_tls
-        print(f"EmailSender initialized for {smtp_user}@{smtp_server}:{smtp_port} (TLS: {use_tls})")
+        self.use_tls = use_tls # For STARTTLS
+        self.use_ssl = use_ssl # For direct SSL connection
+
+        if self.use_ssl and self.use_tls:
+            # It's generally one or the other. Direct SSL implies TLS from the start.
+            # STARTTLS upgrades a plain connection. For clarity, ensure only one is primary.
+            # We'll prioritize direct SSL if both are somehow true.
+            print(f"EmailSender WARNING: Both use_ssl and use_tls are True. Prioritizing direct SSL.")
+            self.use_tls = False # Disable STARTTLS if direct SSL is active
+
+        security_mode = "Direct SSL" if self.use_ssl else ("STARTTLS" if self.use_tls else "None")
+        print(f"EmailSender initialized for {smtp_user}@{smtp_server}:{smtp_port} (Security: {security_mode})")
 
     def send_email(self, to_email, subject, body_html, body_text=None):
         """
@@ -43,22 +53,58 @@ class EmailSender:
 
 
         try:
-            print(f"EmailSender: Attempting to connect to {self.smtp_server}:{self.smtp_port}")
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            connection_details = f"{self.smtp_server}:{self.smtp_port}"
+            server = None # Initialize server variable
+
+            if self.use_ssl:
+                print(f"EmailSender: Attempting SSL connection to {connection_details}")
+                server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port)
+            else:
+                print(f"EmailSender: Attempting non-SSL connection to {connection_details}")
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
                 if self.use_tls:
+                    print(f"EmailSender: Securing connection with STARTTLS for {connection_details}")
                     server.starttls() # Secure the connection
-                server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(self.smtp_user, to_email, msg.as_string())
-                print(f"EmailSender: Email sent successfully to {to_email} with subject '{subject}'")
+
+            # Login and send regardless of connection type (SSL or STARTTLS)
+            # No need for 'with' statement if we manually quit, or ensure it's handled.
+            # For simplicity, let's ensure server.quit() is called in a finally block or rely on 'with' if possible.
+            # The 'with' statement is cleaner if SMTP_SSL also supports it directly.
+            # SMTP_SSL objects don't need starttls(). They are secure from the start.
+
+            # Re-evaluating the 'with' block:
+            # smtplib.SMTP and smtplib.SMTP_SSL can both be used as context managers.
+
+            if self.use_ssl:
+                print(f"EmailSender: Establishing SMTP_SSL session with {connection_details}")
+                with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port) as server_ssl:
+                    # No server.starttls() here as it's SSL from the start
+                    server_ssl.login(self.smtp_user, self.smtp_password)
+                    server_ssl.sendmail(self.smtp_user, to_email, msg.as_string())
+            else: # Standard SMTP, possibly with STARTTLS
+                print(f"EmailSender: Establishing SMTP session with {connection_details}")
+                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server_std:
+                    if self.use_tls:
+                        print(f"EmailSender: Upgrading to STARTTLS for {connection_details}")
+                        server_std.starttls()
+                    server_std.login(self.smtp_user, self.smtp_password)
+                    server_std.sendmail(self.smtp_user, to_email, msg.as_string())
+
+            print(f"EmailSender SUCCESS: Email sent successfully to {to_email} with subject '{subject}'")
             return True
+
         except smtplib.SMTPAuthenticationError as e:
-            print(f"EmailSender Error: SMTP Authentication failed for user {self.smtp_user}. Check credentials. Error: {e}")
+            print(f"EmailSender ERROR: SMTP Authentication failed for user {self.smtp_user}. Check credentials. Error: {e}")
         except smtplib.SMTPServerDisconnected as e:
-            print(f"EmailSender Error: SMTP server disconnected. Check server address/port or network. Error: {e}")
+            print(f"EmailSender ERROR: SMTP server disconnected. Check server address/port or network. Error: {e}")
         except smtplib.SMTPConnectError as e:
-            print(f"EmailSender Error: Could not connect to SMTP server {self.smtp_server}:{self.smtp_port}. Error: {e}")
+            print(f"EmailSender ERROR: Could not connect to SMTP server {self.smtp_server}:{self.smtp_port}. Error: {e}")
+        except ConnectionRefusedError as e: # More specific than just SMTPConnectError for some cases
+            print(f"EmailSender ERROR: Connection refused by server {self.smtp_server}:{self.smtp_port}. Check firewall or if server is running. Error: {e}")
+        except OSError as e: # Catches errors like [Errno 11001] getaddrinfo failed
+             print(f"EmailSender ERROR: OS error while connecting to {self.smtp_server}:{self.smtp_port}. Could be DNS issue or network problem. Error: {e}")
         except Exception as e:
-            print(f"EmailSender Error: An unexpected error occurred while sending email: {e}")
+            print(f"EmailSender ERROR: An unexpected error occurred while sending email: {type(e).__name__} - {e}")
         return False
 
 if __name__ == '__main__':

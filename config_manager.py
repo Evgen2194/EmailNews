@@ -12,7 +12,8 @@ DEFAULT_CONFIG = {
         "port": 587,
         "user": "user@example.com",
         "password": "", # Store passwords securely, e.g., using keyring or encrypted
-        "use_tls": True
+        "use_tls": True,
+        "use_ssl": False # New option for direct SSL
     },
     "scheduled_tasks": [
         # Example task structure:
@@ -63,11 +64,17 @@ def load_config():
                     if key not in config_data:
                         config_data[key] = DEFAULT_CONFIG[key]
                     elif key == "smtp_settings": # Ensure all smtp_settings sub-keys are present
-                        for sub_key in DEFAULT_CONFIG["smtp_settings"]:
+                        for sub_key, default_value in DEFAULT_CONFIG["smtp_settings"].items():
                             if sub_key not in config_data["smtp_settings"]:
-                               config_data["smtp_settings"][sub_key] = DEFAULT_CONFIG["smtp_settings"][sub_key]
+                               config_data["smtp_settings"][sub_key] = default_value
                     elif key == "scheduled_tasks": # Ensure tasks have new fields
                         config_data[key] = [_ensure_task_fields(task) for task in config_data[key]]
+
+                # Final check for smtp_settings if it existed but was missing newer sub-keys
+                if "smtp_settings" in config_data:
+                    for sub_key, default_value in DEFAULT_CONFIG["smtp_settings"].items():
+                        if sub_key not in config_data["smtp_settings"]:
+                            config_data["smtp_settings"][sub_key] = default_value
 
                 print(f"ConfigManager: Configuration loaded from {config_path}")
                 return config_data
