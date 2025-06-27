@@ -45,11 +45,27 @@ class App:
         self.prompt_text = tk.Text(task_frame, height=3, width=50)
         self.prompt_text.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
-        ttk.Label(task_frame, text="Interval:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.interval_entry = ttk.Entry(task_frame, width=20)
-        self.interval_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
-        # TODO: Add more sophisticated interval options (e.g., dropdown)
-        ttk.Label(task_frame, text="(e.g., '1 hour', '1 day 10:00')").grid(row=1, column=1, padx=5, pady=5, sticky="e")
+        # Interval Input Section
+        interval_label_frame = ttk.Frame(task_frame) # Frame to group interval widgets
+        interval_label_frame.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+        ttk.Label(task_frame, text="Interval:").grid(row=1, column=0, padx=5, pady=5, sticky="w") # Label for the whole row
+
+        ttk.Label(interval_label_frame, text="Every:").pack(side=tk.LEFT, padx=(0,2)) # "Every"
+
+        self.interval_value_var = tk.StringVar(value="1") # Variable for the numeric part of interval
+        self.interval_value_entry = ttk.Entry(interval_label_frame, width=5, textvariable=self.interval_value_var) # Entry for number
+        self.interval_value_entry.pack(side=tk.LEFT, padx=(0,5))
+
+        self.interval_unit_var = tk.StringVar() # Variable for the unit part of interval
+        self.interval_units = ["Minutes", "Hours", "Days", "Weeks"] # Available units
+        self.interval_unit_combobox = ttk.Combobox(interval_label_frame, textvariable=self.interval_unit_var,
+                                                 values=self.interval_units, width=10, state="readonly") # Combobox for units
+        self.interval_unit_combobox.pack(side=tk.LEFT)
+        self.interval_unit_combobox.set(self.interval_units[0]) # Default to "Minutes"
+
+        # Old example usage label, commented out as new UI is more explicit
+        # ttk.Label(task_frame, text="(e.g., '1 hour', '1 day 10:00')").grid(row=1, column=1, padx=5, pady=5, sticky="e")
 
 
         self.search_internet_var = tk.BooleanVar()
@@ -71,13 +87,24 @@ class App:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5, padx=(0,5))
         self.tasks_listbox.config(yscrollcommand=scrollbar.set)
 
-        # Buttons for task management
-        task_buttons_frame = ttk.Frame(tasks_display_frame)
-        task_buttons_frame.pack(fill=tk.Y, padx=5, pady=5)
+        # TODO: Add Edit Task button (consider how it interacts with running tasks)
+        # TODO: Add Enable/Disable Task button
 
-        self.remove_task_button = ttk.Button(task_buttons_frame, text="Remove Selected", command=self.remove_selected_task)
-        self.remove_task_button.pack(pady=2, fill=tk.X)
-        # TODO: Add Edit Task button
+        # --- Task Details / Status Frame ---
+        self.task_details_frame = ttk.LabelFrame(master, text="Task Status & Details")
+        self.task_details_frame.grid(row=3, column=2, padx=10, pady=5, sticky="nsew")
+
+        self.details_last_sent_var = tk.StringVar(value="Last Sent: N/A")
+        ttk.Label(self.task_details_frame, textvariable=self.details_last_sent_var).pack(anchor="w", padx=5, pady=2)
+
+        ttk.Label(self.task_details_frame, text="Last Response:").pack(anchor="w", padx=5, pady=(5,0))
+        self.details_last_response_text = tk.Text(self.task_details_frame, height=8, width=40, wrap=tk.WORD, state=tk.DISABLED)
+        self.details_last_response_text.pack(padx=5, pady=5, fill=tk.BOTH, expand=True)
+
+        # Make the text widget expand
+        self.task_details_frame.grid_rowconfigure(1, weight=1) # Assuming Last Response Text is effectively row 1 after labels
+        self.task_details_frame.grid_columnconfigure(0, weight=1)
+
 
         # --- Controls ---
         control_frame = ttk.Frame(master)
@@ -88,12 +115,89 @@ class App:
 
         self.stop_button = ttk.Button(control_frame, text="Stop Scheduler", command=self.stop_scheduler_gui, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
-        
-        master.grid_columnconfigure(1, weight=1) # Allow second column to expand
-        master.grid_rowconfigure(3, weight=1) # Allow task display frame to expand vertically
-        tasks_display_frame.grid_columnconfigure(0, weight=1) # Allow listbox to expand horizontally
 
+        # Task management buttons moved under the listbox or to a better place
+        self.remove_task_button = ttk.Button(control_frame, text="Remove Selected Task", command=self.remove_selected_task)
+        self.remove_task_button.pack(side=tk.LEFT, padx=15) # Spaced out a bit
+        
+        master.grid_columnconfigure(1, weight=1) # Allow task list to expand (col 0 is label)
+        master.grid_columnconfigure(2, weight=1) # Allow task details to expand
+        master.grid_rowconfigure(3, weight=1) # Allow task display frame (row containing listbox and details) to expand vertically
+        tasks_display_frame.grid_columnconfigure(0, weight=1) # Allow listbox to expand horizontally
+        self.task_details_frame.grid_rowconfigure(2, weight=1) # Ensure Text widget can expand
+        self.task_details_frame.grid_columnconfigure(0, weight=1)
+
+
+        self.tasks_listbox.bind('<<ListboxSelect>>', self.on_task_select)
         self.update_tasks_listbox() # Load tasks from config into listbox
+        self.clear_task_details() # Initialize details pane
+        self.master.after(1000, self.periodic_update_tasks_display) # Start periodic updates for countdowns and details
+
+    def on_task_select(self, event=None): # event is ignored but passed by Tkinter bind
+        """
+        Handles selection changes in the tasks listbox.
+        Updates the task details pane with information from the selected task.
+        """
+        selected_indices = self.tasks_listbox.curselection()
+        if not selected_indices: # If nothing is selected (e.g., after removing the last item)
+            self.clear_task_details()
+            return
+
+        selected_index = selected_indices[0]
+        if 0 <= selected_index < len(self.tasks):
+            selected_task_data = self.tasks[selected_index] # self.tasks is from config
+
+            # last_sent_time is ISO string, format it for display
+            last_sent_str = "N/A"
+            if selected_task_data.get("last_sent_time"):
+                try:
+                    # Attempt to parse and reformat. Need datetime import.
+                    from datetime import datetime # local import for safety
+                    dt_obj = datetime.fromisoformat(selected_task_data["last_sent_time"])
+                    last_sent_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    last_sent_str = selected_task_data["last_sent_time"] # Show as is if parse fails
+
+            self.details_last_sent_var.set(f"Last Sent: {last_sent_str}")
+
+            self.details_last_response_text.config(state=tk.NORMAL)
+            self.details_last_response_text.delete("1.0", tk.END)
+            self.details_last_response_text.insert(tk.END, selected_task_data.get("last_response", "No response recorded."))
+            self.details_last_response_text.config(state=tk.DISABLED)
+        else:
+            self.clear_task_details()
+
+    def clear_task_details(self):
+        """Clears the task details pane, resetting it to a default state."""
+        self.details_last_sent_var.set("Last Sent: N/A")
+        self.details_last_response_text.config(state=tk.NORMAL)
+        self.details_last_response_text.delete("1.0", tk.END)
+        self.details_last_response_text.insert(tk.END, "Select a task from the list to see its details.")
+        self.details_last_response_text.config(state=tk.DISABLED)
+
+
+    def periodic_update_tasks_display(self):
+        """
+        Periodically updates the task listbox (for countdowns) and the details pane
+        (if a task is selected and its info might have changed).
+        This function reschedules itself to run every second.
+        """
+        if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
+            self.update_tasks_listbox() # Refreshes countdowns in the list
+            # If a task is selected, its details (like last sent time/response) might change
+            # due to scheduler actions, so refresh the details pane too.
+            if self.tasks_listbox.curselection():
+                self.on_task_select()
+        self.master.after(1000, self.periodic_update_tasks_display) # Reschedule for the next second
+
+    def stop_scheduler_gui(self):
+        print("DEBUG: gui.py -> stop_scheduler_gui() CALLED") # DEBUG LOG
+        scheduler.stop_scheduler_thread()
+        messagebox.showinfo("Scheduler", "Scheduler stopped.")
+        self.start_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED)
+        self.add_task_button.config(state=tk.NORMAL)
+        self.remove_task_button.config(state=tk.NORMAL)
 
     def open_smtp_settings_dialog(self):
         smtp_config = self.config.get("smtp_settings", config_manager.DEFAULT_CONFIG["smtp_settings"].copy())
@@ -202,8 +306,34 @@ class App:
 
     def add_task_gui(self):
         prompt = self.prompt_text.get("1.0", tk.END).strip()
-        interval = self.interval_entry.get().strip()
+
+        interval_value_str = self.interval_value_var.get().strip()
+        interval_unit = self.interval_unit_var.get()
         search_internet = self.search_internet_var.get()
+
+        if not interval_value_str.isdigit() or int(interval_value_str) <= 0:
+            messagebox.showerror("Error", "Interval value must be a positive number.")
+            return
+
+        interval_value = int(interval_value_str)
+
+        # Format interval string for scheduler.py (e.g., "5 minutes", "1 day")
+        # Note: scheduler.py's _parse_interval will need to handle this format.
+        # It expects "N unit(s)", so singular/plural might need adjustment or flexible parsing there.
+        # For simplicity, using singular for now, assuming scheduler handles it or is adapted.
+        # Example: "minutes" -> "minute" for "1 minute" vs "2 minutes"
+        # The schedule library is flexible with plurals for its direct methods.
+
+        # Map GUI display names to what 'schedule' library might expect or our parser.
+        unit_mapping = {
+            "Minutes": "minutes",
+            "Hours": "hours",
+            "Days": "days",
+            "Weeks": "weeks"
+        }
+        parsed_unit = unit_mapping.get(interval_unit, "minutes") # Default to minutes if something is wrong
+
+        interval_str = f"{interval_value} {parsed_unit}"
         
         # Use global API key and recipient email by default for a task
         # These could be overridden per task if UI is expanded later
@@ -219,15 +349,14 @@ class App:
         if not prompt:
             messagebox.showerror("Error", "Prompt cannot be empty.")
             return
-        if not interval: 
-            messagebox.showerror("Error", "Interval cannot be empty.")
-            return
+        # Interval check is implicitly handled by the new input method's structure
+        # and the initial digit check.
 
         task_id = str(uuid.uuid4()) # Generate a unique ID for the task
         new_task = {
             "id": task_id,
             "prompt": prompt,
-            "interval": interval,
+            "interval": interval_str, # Use the newly formatted interval string
             "search_internet": search_internet,
             "enabled": True # New tasks are enabled by default
             # api_key and recipient_email are implicitly global for now
@@ -240,7 +369,8 @@ class App:
             messagebox.showinfo("Success", f"Task '{prompt[:30]}...' added.")
             # Clear input fields
             self.prompt_text.delete("1.0", tk.END)
-            self.interval_entry.delete(0, tk.END)
+            self.interval_value_var.set("1") # Reset to default
+            self.interval_unit_combobox.set(self.interval_units[0]) # Reset to default
             self.search_internet_var.set(False)
         else:
             messagebox.showerror("Error", "Failed to save task to configuration.")
@@ -284,11 +414,33 @@ class App:
     def update_tasks_listbox(self):
         self.tasks_listbox.delete(0, tk.END)
         # self.tasks should be kept in sync with config_manager's tasks
-        self.tasks = config_manager.get_tasks() # Refresh from source of truth
+        self.tasks = config_manager.get_tasks() # Refresh from source of truth config
         
+        # Get current statuses from the running scheduler if it's active
+        scheduler_statuses = {}
+        if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
+            live_tasks_info = scheduler.list_tasks() # This now returns dicts with 'id' and 'time_remaining_str'
+            for info in live_tasks_info:
+                scheduler_statuses[info["id"]] = info["time_remaining_str"]
+
         for i, task in enumerate(self.tasks):
-            status = "✓" if task.get("enabled", True) else "✗"
-            display_text = f"{status} {task.get('id', 'NoID')[:8]} | {task['prompt'][:30]}... | {task['interval']}"
+            task_id = task.get("id", "NoID")
+            status_icon = "✓" if task.get("enabled", True) else "✗"
+            prompt_preview = task['prompt'][:30]
+            interval_info = task['interval']
+
+            countdown_str = ""
+            if task.get("enabled", True): # Only show countdown for enabled tasks
+                if task_id in scheduler_statuses:
+                    countdown_str = f"(Next: {scheduler_statuses[task_id]})"
+                elif scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
+                    # Task is enabled but not in live scheduler (e.g., just added, scheduler not refreshed yet)
+                    countdown_str = "(Pending schedule)"
+                else:
+                    countdown_str = "(Scheduler stopped)"
+
+
+            display_text = f"{status_icon} {task_id[:8]} | {prompt_preview}... | {interval_info} {countdown_str}"
             if task['search_internet']:
                 display_text += " (Net)"
             self.tasks_listbox.insert(tk.END, display_text)
@@ -337,11 +489,16 @@ class App:
 
     def on_closing(self):
         """Handle window close event."""
+        print("DEBUG: gui.py -> on_closing() CALLED") # DEBUG LOG
         if messagebox.askokcancel("Quit", "Do you want to quit?\nThis will stop the scheduler if it's running."):
+            print("DEBUG: gui.py -> on_closing() - User chose to quit.") # DEBUG LOG
             self.save_main_config() # Save any changes in API key/email
             if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
+                print("DEBUG: gui.py -> on_closing() is calling stop_scheduler_gui()") # DEBUG LOG
                 self.stop_scheduler_gui()
             self.master.destroy()
+        else:
+            print("DEBUG: gui.py -> on_closing() - User cancelled quit.") # DEBUG LOG
 
 
 if __name__ == '__main__':
