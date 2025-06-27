@@ -318,6 +318,80 @@ def _run_scheduler():
     _jobs.clear() # Clear our internal list of job objects
     print("Scheduler: All scheduled jobs cleared.")
 
+# --- New function for immediate run and schedule ---
+def run_task_now_and_schedule(task_config, global_api_key, global_email_to, global_smtp_config):
+    """
+    Runs a task immediately and then schedules it for future executions.
+    This function is typically called when a new task is added via the GUI.
+
+    Args:
+        task_config (dict): The configuration dictionary for the task.
+                            Expected keys: "id", "prompt", "interval", "search_internet".
+        global_api_key (str): The Gemini API key.
+        global_email_to (str): The default recipient email address.
+        global_smtp_config (dict): SMTP configuration details.
+
+    Returns:
+        bool: True if the task was successfully scheduled for future runs, False otherwise.
+              The immediate execution part logs its own success/failure.
+    """
+    task_id = task_config.get("id")
+    prompt = task_config.get("prompt")
+    interval_str = task_config.get("interval")
+    search_internet = task_config.get("search_internet", False)
+
+    # Use task-specific API key and email if provided in task_config, otherwise use global
+    # (Currently, task_config in this app doesn't store these overrides, but good for future)
+    api_key_to_use = task_config.get("api_key", global_api_key)
+    email_to_use = task_config.get("email_to", global_email_to)
+
+    if not all([task_id, prompt, interval_str]):
+        print(f"Scheduler ERROR: Task {task_id} is missing required fields (prompt, interval) for run_task_now_and_schedule.")
+        return False
+
+    print(f"Scheduler INFO: run_task_now_and_schedule called for task ID '{task_id}'. Performing immediate execution.")
+    try:
+        # 1. Execute the task immediately
+        _task_execution_function(
+            task_id=task_id,
+            prompt=prompt,
+            search_internet=search_internet,
+            email_to=email_to_use,
+            api_key=api_key_to_use,
+            smtp_config=global_smtp_config
+        )
+        print(f"Scheduler INFO: Immediate execution of task '{task_id}' completed.")
+    except Exception as e:
+        # _task_execution_function should ideally handle its own exceptions and log them.
+        # This is a fallback catch.
+        print(f"Scheduler CRITICAL: Unexpected exception during immediate execution of task '{task_id}': {e}")
+        traceback.print_exc()
+        # We might still try to schedule it, or return False. Let's try to schedule.
+
+    print(f"Scheduler INFO: Task '{task_id}' - Proceeding to schedule for future runs with interval '{interval_str}'.")
+    # 2. Schedule the task for future runs
+    # add_task returns True if scheduling (parsing interval and adding to schedule lib) was successful.
+    scheduled_successfully = add_task(
+        task_id=task_id,
+        prompt=prompt,
+        interval_str=interval_str,
+        search_internet=search_internet,
+        email_to=email_to_use,
+        api_key=api_key_to_use,
+        smtp_config=global_smtp_config
+    )
+
+    if scheduled_successfully:
+        print(f"Scheduler INFO: Task '{task_id}' successfully scheduled for future runs.")
+        # If the scheduler thread is not running, the task is now in schedule.jobs
+        # and will be picked up when start_scheduler_thread is called (which clears and re-adds).
+        # If the scheduler thread IS running, add_task has added it to the live schedule.jobs list,
+        # and the running schedule.run_pending() loop will pick it up.
+    else:
+        print(f"Scheduler ERROR: Task '{task_id}' failed to schedule for future runs.")
+
+    return scheduled_successfully
+
 
 def start_scheduler_thread(tasks_to_schedule, global_api_key, global_email_to, global_smtp_config):
     """
