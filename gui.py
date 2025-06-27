@@ -119,6 +119,16 @@ class App:
         # Task management buttons moved under the listbox or to a better place
         self.remove_task_button = ttk.Button(control_frame, text="Remove Selected Task", command=self.remove_selected_task)
         self.remove_task_button.pack(side=tk.LEFT, padx=15) # Spaced out a bit
+
+        # --- Frame for task actions (Enable/Disable) ---
+        task_actions_frame = ttk.Frame(master)
+        task_actions_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=0, sticky="ew") # Placed below listbox, before main controls
+
+        self.enable_task_button = ttk.Button(task_actions_frame, text="Enable Selected", command=self.enable_selected_task, state=tk.DISABLED)
+        self.enable_task_button.pack(side=tk.LEFT, padx=5, pady=(0,5))
+
+        self.disable_task_button = ttk.Button(task_actions_frame, text="Disable Selected", command=self.disable_selected_task, state=tk.DISABLED)
+        self.disable_task_button.pack(side=tk.LEFT, padx=5, pady=(0,5))
         
         master.grid_columnconfigure(1, weight=1) # Allow task list to expand (col 0 is label)
         master.grid_columnconfigure(2, weight=1) # Allow task details to expand
@@ -136,36 +146,47 @@ class App:
     def on_task_select(self, event=None): # event is ignored but passed by Tkinter bind
         """
         Handles selection changes in the tasks listbox.
-        Updates the task details pane with information from the selected task.
+        Updates the task details pane and enable/disable buttons.
         """
         selected_indices = self.tasks_listbox.curselection()
-        if not selected_indices: # If nothing is selected (e.g., after removing the last item)
+        if not selected_indices: # If nothing is selected
             self.clear_task_details()
+            self.enable_task_button.config(state=tk.DISABLED)
+            self.disable_task_button.config(state=tk.DISABLED)
             return
 
         selected_index = selected_indices[0]
         if 0 <= selected_index < len(self.tasks):
             selected_task_data = self.tasks[selected_index] # self.tasks is from config
 
-            # last_sent_time is ISO string, format it for display
+            # Update details pane
             last_sent_str = "N/A"
             if selected_task_data.get("last_sent_time"):
                 try:
-                    # Attempt to parse and reformat. Need datetime import.
-                    from datetime import datetime # local import for safety
+                    from datetime import datetime
                     dt_obj = datetime.fromisoformat(selected_task_data["last_sent_time"])
                     last_sent_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
                 except ValueError:
-                    last_sent_str = selected_task_data["last_sent_time"] # Show as is if parse fails
+                    last_sent_str = selected_task_data["last_sent_time"]
 
             self.details_last_sent_var.set(f"Last Sent: {last_sent_str}")
-
             self.details_last_response_text.config(state=tk.NORMAL)
             self.details_last_response_text.delete("1.0", tk.END)
             self.details_last_response_text.insert(tk.END, selected_task_data.get("last_response", "No response recorded."))
             self.details_last_response_text.config(state=tk.DISABLED)
+
+            # Update Enable/Disable buttons based on task's current 'enabled' state
+            is_enabled = selected_task_data.get("enabled", True) # Default to True if not present
+            if is_enabled:
+                self.enable_task_button.config(state=tk.DISABLED)
+                self.disable_task_button.config(state=tk.NORMAL)
+            else:
+                self.enable_task_button.config(state=tk.NORMAL)
+                self.disable_task_button.config(state=tk.DISABLED)
         else:
             self.clear_task_details()
+            self.enable_task_button.config(state=tk.DISABLED)
+            self.disable_task_button.config(state=tk.DISABLED)
 
     def clear_task_details(self):
         """Clears the task details pane, resetting it to a default state."""
@@ -175,6 +196,56 @@ class App:
         self.details_last_response_text.insert(tk.END, "Select a task from the list to see its details.")
         self.details_last_response_text.config(state=tk.DISABLED)
 
+    def _handle_task_enable_disable(self, enable_flag):
+        """Common logic for enabling or disabling a selected task."""
+        selected_indices = self.tasks_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("No Selection", "Please select a task.")
+            return
+
+        selected_index = selected_indices[0]
+        if 0 <= selected_index < len(self.tasks):
+            task_to_modify = self.tasks[selected_index]
+            task_id = task_to_modify.get("id")
+
+            if not task_id:
+                messagebox.showerror("Error", "Selected task has no ID. Cannot modify.")
+                return
+
+            # Create a copy to modify, then update
+            updated_task_data = task_to_modify.copy()
+            updated_task_data["enabled"] = enable_flag
+
+            if config_manager.update_task_in_config(task_id, updated_task_data):
+                # Refresh local tasks cache directly for consistency before UI update
+                self.tasks = config_manager.get_tasks()
+
+                # Update listbox and selection state for buttons
+                self.update_tasks_listbox()
+                # Try to reselect the item to update button states, may need index adjustment if list changes
+                self.tasks_listbox.select_set(selected_index)
+                self.on_task_select() # Refresh button states based on new task state
+
+                action = "enabled" if enable_flag else "disabled"
+                messagebox.showinfo("Success", f"Task '{task_to_modify['prompt'][:30]}...' {action}.")
+
+                # If scheduler is running, restart it to apply changes
+                if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
+                    print(f"GUI: Scheduler running, restarting to apply task enable/disable changes for task {task_id}")
+                    self.stop_scheduler_gui()
+                    self.start_scheduler_gui()
+            else:
+                messagebox.showerror("Error", f"Failed to update task '{task_to_modify['prompt'][:30]}...' state.")
+        else:
+            messagebox.showerror("Error", "Invalid task selection for enable/disable.")
+
+    def enable_selected_task(self):
+        """Enables the selected task."""
+        self._handle_task_enable_disable(True)
+
+    def disable_selected_task(self):
+        """Disables the selected task."""
+        self._handle_task_enable_disable(False)
 
     def periodic_update_tasks_display(self):
         """
@@ -415,6 +486,7 @@ class App:
         self.tasks_listbox.delete(0, tk.END)
         # self.tasks should be kept in sync with config_manager's tasks
         self.tasks = config_manager.get_tasks() # Refresh from source of truth config
+        print(f"DEBUG: gui.py -> update_tasks_listbox -> self.tasks from config: {self.tasks}")
         
         # Get current statuses from the running scheduler if it's active
         scheduler_statuses = {}
@@ -422,6 +494,7 @@ class App:
             live_tasks_info = scheduler.list_tasks() # This now returns dicts with 'id' and 'time_remaining_str'
             for info in live_tasks_info:
                 scheduler_statuses[info["id"]] = info["time_remaining_str"]
+        print(f"DEBUG: gui.py -> update_tasks_listbox -> scheduler_statuses: {scheduler_statuses}")
 
         for i, task in enumerate(self.tasks):
             task_id = task.get("id", "NoID")
@@ -447,7 +520,11 @@ class App:
 
     def start_scheduler_gui(self):
         self.save_main_config() # Save current API key and email before starting
-        
+
+        # Ensure self.tasks is up-to-date with the configuration file
+        self.tasks = config_manager.get_tasks()
+        print(f"DEBUG: gui.py -> start_scheduler_gui -> self.tasks reloaded: {self.tasks}")
+
         current_api_key = self.api_key_var.get()
         current_email_to = self.email_var.get()
         # SMTP config is loaded from self.config by the scheduler module if needed
@@ -467,11 +544,12 @@ class App:
             
         # Pass only enabled tasks to the scheduler
         scheduler.start_scheduler_thread(
-            active_tasks, 
-            current_api_key, 
+            active_tasks,
+            current_api_key,
             current_email_to, # This is the default email; tasks might override later if feature is added
             current_smtp_config
         )
+        print(f"DEBUG: gui.py -> start_scheduler_gui -> Called scheduler.start_scheduler_thread with active_tasks: {active_tasks}")
         messagebox.showinfo("Scheduler", "Scheduler started with enabled tasks.")
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)

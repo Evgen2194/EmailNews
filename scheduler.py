@@ -188,10 +188,13 @@ def list_tasks():
               - "job_str" (str): String representation of the schedule job object for debugging.
     """
     if not schedule.jobs:
+        print("DEBUG: scheduler.py -> list_tasks -> No jobs in schedule.jobs")
         return [] # No jobs scheduled
 
     tasks_info = []
     now = datetime.datetime.now() # Current time, fetched once for consistency in calculations
+
+    print(f"DEBUG: scheduler.py -> list_tasks -> Current schedule.jobs: {schedule.jobs}")
 
     for job in schedule.jobs:
         if not job.tags: # Each job should be tagged with its task_id
@@ -306,6 +309,8 @@ def start_scheduler_thread(tasks_to_schedule, global_api_key, global_email_to, g
     # Clear any previous jobs before starting
     schedule.clear()
     _jobs.clear()
+
+    print(f"DEBUG: scheduler.py -> start_scheduler_thread -> Received tasks_to_schedule: {tasks_to_schedule}")
 
     for i, task_config in enumerate(tasks_to_schedule):
         # Assuming task_config has 'prompt', 'interval', 'search_internet'
