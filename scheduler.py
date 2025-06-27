@@ -2,6 +2,7 @@
 import time
 import threading
 import schedule
+import datetime # Added for next_run calculations
 
 # This will hold the jobs managed by the schedule library
 _jobs = []
@@ -56,10 +57,27 @@ def _placeholder_task_function(task_id, prompt, search_internet, email_to, api_k
             print(f"  Attempting to send email to {email_to} via {smtp_config['user']}@{smtp_config['server']}...")
             if sender.send_email(email_to, subject, body_html, body_text):
                 print(f"  Email successfully sent to {email_to}.")
+                # Update last run details in config after successful send
+                try:
+                    # Local import for config_manager to avoid potential top-level circular dependencies
+                    # and to ensure it's only imported when needed for this operation.
+                    import config_manager
+                    current_time_iso = datetime.datetime.now().isoformat() # Get current time in ISO format
+                    # Save the Gemini response and the time of successful sending
+                    if config_manager.update_task_last_run_details(task_id, response, current_time_iso):
+                        print(f"  Task {task_id}: Last run details (response/time) updated in config.")
+                    else:
+                        # This might happen if the task was deleted from config just before this update.
+                        print(f"  Task {task_id}: Failed to update last run details in config (task ID not found?).")
+                except ImportError:
+                     print("  Scheduler Error: ConfigManager module not found. Cannot update task details.")
+                except Exception as e_conf: # Catch any other errors during config update
+                    print(f"  Scheduler Error: An unexpected error occurred while updating task details in config for {task_id}: {e_conf}")
             else:
-                print(f"  Failed to send email to {email_to}. Check EmailSender logs.")
-        except ImportError:
-            print("  EmailSender module not found. Cannot send email.")
+                # Email sending failed as per EmailSender's return value
+                print(f"  Task {task_id}: Failed to send email to {email_to} (EmailSender returned false). Check EmailSender logs.")
+        except ImportError: # For EmailSender module itself
+            print("  Scheduler Error: EmailSender module not found. Cannot send email.")
         except KeyError as e:
             print(f"  Email sending skipped: Missing key in smtp_config: {e}. Full config: {smtp_config}")
         except Exception as e:
@@ -72,36 +90,49 @@ def _placeholder_task_function(task_id, prompt, search_internet, email_to, api_k
 
 def _parse_interval(interval_str):
     """
-    Parses an interval string (e.g., "5 seconds", "1 minute", "1 hour", "1 day 10:00")
+    Parses an interval string in the format "N unit" (e.g., "5 minutes", "1 hour", "2 days", "3 weeks")
     and configures a schedule job.
     Returns a schedule.Job object or None if parsing fails.
     
-    This is a simplified parser. A more robust solution might use regex
-    or a dedicated parsing library.
+    Supported units: "minutes", "hours", "days", "weeks" (and their singular forms).
+    The value N must be a positive integer.
     """
-    parts = interval_str.lower().split()
+    parts = interval_str.lower().split() # e.g., "5 minutes" -> ["5", "minutes"]
     job = schedule.every()
     
+    if len(parts) != 2:
+        print(f"Scheduler: Invalid interval format: '{interval_str}'. Expected 'N unit' (e.g., '10 minutes').")
+        return None
+
     try:
-        if "second" in parts[1]:
-            job = job.seconds(int(parts[0]))
-        elif "minute" in parts[1]:
-            job = job.minutes(int(parts[0]))
-        elif "hour" in parts[1]:
-            job = job.hours(int(parts[0]))
-        elif "day" in parts[1]:
-            if len(parts) > 2 and ":" in parts[2]: # e.g., "1 day 10:00"
-                job = job.day.at(parts[2])
-            else: # e.g., "1 day" or "days"
-                job = job.days(int(parts[0])) # Assumes "days" if just a number
-        # Add more specific cases like "weekly", "monday at 10:00" etc. if needed
-        # e.g. job.monday.at("10:30")
-        else:
-            print(f"Scheduler: Could not parse interval string: {interval_str}")
+        value = int(parts[0])
+        unit = parts[1]
+
+        if value <= 0:
+            print(f"Scheduler: Interval value must be a positive integer, got: {value} from '{interval_str}'")
             return None
+
+        if unit in ["minute", "minutes"]:
+            job = job.minutes(value)
+        elif unit in ["hour", "hours"]:
+            job = job.hours(value)
+        elif unit in ["day", "days"]:
+            job = job.days(value)
+            # Note: If specific times for daily tasks (e.g., "every day at 10:00") are needed,
+            # the GUI would need to provide this, and this parser would need to be extended
+            # to handle job.at("HH:MM"). For now, "X days" means "every X days from now".
+        elif unit in ["week", "weeks"]:
+            job = job.weeks(value)
+        else:
+            print(f"Scheduler: Unknown interval unit: '{unit}' in '{interval_str}'. Supported: minutes, hours, days, weeks.")
+            return None
+
         return job
-    except (IndexError, ValueError) as e:
-        print(f"Scheduler: Error parsing interval '{interval_str}': {e}")
+    except ValueError: # Handles non-integer for value
+        print(f"Scheduler: Invalid interval number: '{parts[0]}' in '{interval_str}'. Must be an integer.")
+        return None
+    except Exception as e: # Catch-all for other unexpected errors during parsing
+        print(f"Scheduler: Unexpected error parsing interval '{interval_str}': {e}")
         return None
 
 def add_task(task_id, prompt, interval_str, search_internet, email_to, api_key, smtp_config):
@@ -138,14 +169,85 @@ def remove_task(task_id):
     print(f"Scheduler: Task '{task_id}' removed.")
 
 def list_tasks():
-    """Lists all currently scheduled tasks."""
+    """
+    Lists all currently scheduled tasks, providing their ID, next run time,
+    and a formatted string for the time remaining until the next run.
+
+    Returns:
+        list: A list of dictionaries, where each dictionary contains:
+              - "id" (str): The unique ID of the task.
+              - "next_run_iso" (str | None): ISO formatted string of the next run datetime, or None.
+              - "time_remaining_str" (str): Formatted countdown string (e.g., "01:23:45",
+                                            "Running/Overdue", or "N/A").
+              - "job_str" (str): String representation of the schedule job object for debugging.
+    """
     if not schedule.jobs:
-        print("Scheduler: No tasks currently scheduled.")
-        return []
+        return [] # No jobs scheduled
+
     tasks_info = []
+    now = datetime.datetime.now() # Current time, fetched once for consistency in calculations
+
     for job in schedule.jobs:
-        tasks_info.append(str(job)) # Basic representation, can be improved
+        if not job.tags: # Each job should be tagged with its task_id
+            print(f"Scheduler Warning: Found a job with no tags: {job}")
+            continue
+
+        task_id = list(job.tags)[0] # Assume the first tag is the unique task ID
+        next_run_dt = job.next_run  # datetime object for the next scheduled execution
+
+        time_remaining_str = "N/A" # Default if next_run_dt is None
+        if next_run_dt:
+            if next_run_dt > now: # If the next run is in the future
+                time_remaining = next_run_dt - now # timedelta object
+                total_seconds = int(time_remaining.total_seconds())
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                time_remaining_str = f"{hours:02}:{minutes:02}:{seconds:02}" # HH:MM:SS format
+            else: # If the next run is in the past or now
+                time_remaining_str = "Running/Overdue"
+
+        tasks_info.append({
+            "id": task_id,
+            "next_run_iso": next_run_dt.isoformat() if next_run_dt else None,
+            "time_remaining_str": time_remaining_str,
+            "job_str": str(job) # Useful for debugging the raw schedule job
+        })
     return tasks_info
+
+def get_task_status_by_id(task_id_to_find):
+    """
+    Gets status (next run time, time remaining) for a specific task by its ID.
+    This is similar to list_tasks but filtered for a single task.
+
+    Args:
+        task_id_to_find (str): The ID of the task to find.
+
+    Returns:
+        dict | None: A dictionary with task status details (similar to list_tasks items)
+                      if found, otherwise None.
+    """
+    for job in schedule.jobs:
+        if task_id_to_find in job.tags:
+            now = datetime.datetime.now()
+            next_run_dt = job.next_run
+            time_remaining_str = "N/A"
+            if next_run_dt:
+                if next_run_dt > now:
+                    time_remaining = next_run_dt - now
+                    total_seconds = int(time_remaining.total_seconds())
+                    hours, remainder = divmod(total_seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    time_remaining_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+                else:
+                    time_remaining_str = "Running/Overdue"
+            return { # Return structure matches items from list_tasks
+                "id": task_id_to_find,
+                "next_run_iso": next_run_dt.isoformat() if next_run_dt else None,
+                "time_remaining_str": time_remaining_str,
+                "job_str": str(job)
+            }
+    return None # Task not found
+
 
 def _run_scheduler():
     """Target function for the scheduler thread."""

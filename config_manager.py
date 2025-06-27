@@ -21,10 +21,22 @@ DEFAULT_CONFIG = {
         # "prompt": "What's the weather like tomorrow?",
         # "interval": "1 day 07:00", # Parsable by scheduler.py
         # "search_internet": True,
-        # "enabled": True # To easily disable tasks without deleting
+        # "enabled": True, # To easily disable tasks without deleting
+        # "last_response": "", # Stores the latest Gemini response for this task
+        # "last_sent_time": "" # Stores ISO formatted datetime string of the last successful send
         # }
     ]
 }
+
+# Helper to ensure tasks have new fields (last_response, last_sent_time)
+# when loaded from older config files that might not have them.
+def _ensure_task_fields(task_data):
+    """Adds default empty strings for new task fields if they are missing."""
+    if "last_response" not in task_data:
+        task_data["last_response"] = ""
+    if "last_sent_time" not in task_data:
+        task_data["last_sent_time"] = ""
+    return task_data
 
 def get_config_path():
     """Determines the path for the config file (e.g., in user's app data directory)."""
@@ -46,25 +58,31 @@ def load_config():
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 config_data = json.load(f)
-                # Basic validation: ensure all top-level keys from default are present
+                # Basic validation and migration for new fields
                 for key in DEFAULT_CONFIG:
                     if key not in config_data:
                         config_data[key] = DEFAULT_CONFIG[key]
-                    # Specifically for smtp_settings, ensure all sub-keys are present
-                    if key == "smtp_settings":
+                    elif key == "smtp_settings": # Ensure all smtp_settings sub-keys are present
                         for sub_key in DEFAULT_CONFIG["smtp_settings"]:
                             if sub_key not in config_data["smtp_settings"]:
                                config_data["smtp_settings"][sub_key] = DEFAULT_CONFIG["smtp_settings"][sub_key]
+                    elif key == "scheduled_tasks": # Ensure tasks have new fields
+                        config_data[key] = [_ensure_task_fields(task) for task in config_data[key]]
 
                 print(f"ConfigManager: Configuration loaded from {config_path}")
                 return config_data
         else:
-            print(f"ConfigManager: Config file not found at {config_path}. Using default configuration.")
-            save_config(DEFAULT_CONFIG) # Save default config if none exists
-            return DEFAULT_CONFIG
+            print(f"ConfigManager: Config file not found at {config_path}. Using default configuration (will be saved).")
+            # For default config, ensure tasks also have the new fields if any are predefined (currently none)
+            default_tasks_migrated = [_ensure_task_fields(task) for task in DEFAULT_CONFIG.get("scheduled_tasks", [])]
+            final_default_config = DEFAULT_CONFIG.copy()
+            final_default_config["scheduled_tasks"] = default_tasks_migrated
+            save_config(final_default_config)
+            return final_default_config
     except json.JSONDecodeError:
         print(f"ConfigManager: Error decoding JSON from {config_path}. Using default configuration.")
-        return DEFAULT_CONFIG
+        # Return a deep copy to prevent modification of the global DEFAULT_CONFIG
+        return json.loads(json.dumps(DEFAULT_CONFIG))
     except Exception as e:
         print(f"ConfigManager: An error occurred loading config: {e}. Using default configuration.")
         return DEFAULT_CONFIG
@@ -92,11 +110,13 @@ def save_config(config_data):
 
 def get_tasks():
     config = load_config()
-    return config.get("scheduled_tasks", [])
+    # Ensure all tasks have the new fields, even if loaded from an older config
+    # This is now handled in load_config, but an extra check here doesn't hurt for direct get_tasks calls.
+    return [_ensure_task_fields(task) for task in config.get("scheduled_tasks", [])]
 
 def add_task_to_config(task_data):
     """Adds a single task to the configuration and saves it."""
-    config = load_config()
+    config = load_config() # This will already have migrated tasks if loaded from file
     if "scheduled_tasks" not in config:
         config["scheduled_tasks"] = []
     
@@ -111,18 +131,49 @@ def add_task_to_config(task_data):
 
 def update_task_in_config(task_id, updated_task_data):
     """Updates an existing task in the configuration by its ID."""
-    config = load_config()
+    config = load_config() # Ensures tasks are migrated if loaded from an older config
     task_found = False
     for i, task in enumerate(config.get("scheduled_tasks", [])):
         if task.get("id") == task_id:
-            config["scheduled_tasks"][i] = updated_task_data
+            # Ensure the updated data also has the new fields (last_response, last_sent_time)
+            # This is important if updated_task_data comes from a source not aware of these fields.
+            config["scheduled_tasks"][i] = _ensure_task_fields(updated_task_data)
             task_found = True
             break
     if task_found:
         return save_config(config)
     else:
-        print(f"ConfigManager: Task with ID '{task_id}' not found for update.")
+        print(f"ConfigManager: Task with ID '{task_id}' not found for full update.")
         return False
+
+def update_task_last_run_details(task_id, last_response, last_sent_time_iso):
+    """
+    Updates only the 'last_response' and 'last_sent_time' fields for a specific task
+    identified by its task_id. This is typically called by the scheduler after a task runs.
+
+    Args:
+        task_id (str): The unique ID of the task to update.
+        last_response (str): The response content from the last execution.
+        last_sent_time_iso (str): The ISO formatted datetime string of the last send.
+
+    Returns:
+        bool: True if the task was found and config saved, False otherwise.
+    """
+    config = load_config() # Ensures tasks are migrated if loaded from an older config
+    task_updated = False
+    for task in config.get("scheduled_tasks", []): # Iterate through tasks to find the one with matching ID
+        if task.get("id") == task_id:
+            task["last_response"] = last_response
+            task["last_sent_time"] = last_sent_time_iso
+            task_updated = True
+            break # Found and updated the task, no need to continue loop
+
+    if task_updated:
+        return save_config(config) # Save the entire configuration with the updated task details
+    else:
+        print(f"ConfigManager: Task with ID '{task_id}' not found for updating last run details.")
+        return False
+
 
 def remove_task_from_config(task_id):
     """Removes a task from the configuration by its ID."""
