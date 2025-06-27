@@ -34,13 +34,39 @@ def _placeholder_task_function(task_id, prompt, search_internet, email_to, api_k
         response = f"(Simulated search done) {response}"
     print(f"  Simulated Gemini Response: {response}")
 
-    # --- Simulate Email Sending ---
-    # In real implementation, you'd import and use EmailSender
-    # from email_sender import EmailSender
-    # sender = EmailSender(smtp_config) # smtp_config would come from global app config
-    # subject = f"Scheduled Gemini Response: {prompt[:30]}..."
-    # sender.send_email(email_to, subject, response)
-    print(f"  Simulating email sent to {email_to} with subject 'Scheduled Gemini Response: {prompt[:20]}...'")
+    # --- Email Sending ---
+    if smtp_config and smtp_config.get("server") and smtp_config.get("user"): # Basic check
+        try:
+            from email_sender import EmailSender # Import here to avoid circular deps if any at module level
+
+            sender = EmailSender(
+                smtp_server=smtp_config["server"],
+                smtp_port=int(smtp_config["port"]), # Ensure port is int
+                smtp_user=smtp_config["user"],
+                smtp_password=smtp_config["password"],
+                use_tls=smtp_config.get("use_tls", True)
+            )
+            subject = f"Scheduled Gemini Response: {prompt[:30]}..."
+
+            # For now, sending HTML and Text as the same.
+            # Could refine to generate a simpler text version.
+            body_html = f"<html><body><h1>Gemini Task Result</h1><p><b>Prompt:</b> {prompt}</p><hr><p>{response.replace('n', '<br>')}</p></body></html>"
+            body_text = f"Gemini Task Result\nPrompt: {prompt}\n\nResponse:\n{response}"
+
+            print(f"  Attempting to send email to {email_to} via {smtp_config['user']}@{smtp_config['server']}...")
+            if sender.send_email(email_to, subject, body_html, body_text):
+                print(f"  Email successfully sent to {email_to}.")
+            else:
+                print(f"  Failed to send email to {email_to}. Check EmailSender logs.")
+        except ImportError:
+            print("  EmailSender module not found. Cannot send email.")
+        except KeyError as e:
+            print(f"  Email sending skipped: Missing key in smtp_config: {e}. Full config: {smtp_config}")
+        except Exception as e:
+            print(f"  An error occurred during email sending: {e}")
+    else:
+        print(f"  Email sending skipped: SMTP configuration is incomplete or missing. Config: {smtp_config}")
+
     print("--- Task execution finished ---")
 
 

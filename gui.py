@@ -32,8 +32,8 @@ class App:
         self.email_entry = ttk.Entry(config_frame, width=50, textvariable=self.email_var)
         self.email_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
         
-        # SMTP Configuration Button (simplified for now)
-        self.smtp_button = ttk.Button(config_frame, text="SMTP Settings (Placeholder)", command=self.open_smtp_settings)
+        # SMTP Configuration Button
+        self.smtp_button = ttk.Button(config_frame, text="SMTP Settings", command=self.open_smtp_settings_dialog)
         self.smtp_button.grid(row=2, column=0, columnspan=2, pady=5)
 
 
@@ -95,13 +95,100 @@ class App:
 
         self.update_tasks_listbox() # Load tasks from config into listbox
 
-    def open_smtp_settings(self):
-        # Placeholder for SMTP settings dialog
-        # This would open a new Toplevel window to configure SMTP details
-        # from self.config["smtp_settings"]
-        messagebox.showinfo("SMTP Settings", "SMTP configuration dialog will be implemented here.\n"
-                                           f"Current (dummy): {self.config['smtp_settings']['server']}")
-                                           
+    def open_smtp_settings_dialog(self):
+        smtp_config = self.config.get("smtp_settings", config_manager.DEFAULT_CONFIG["smtp_settings"].copy())
+
+        dialog = tk.Toplevel(self.master)
+        dialog.title("SMTP Settings")
+        dialog.transient(self.master) # Keep dialog on top of main window
+        dialog.grab_set() # Modal behavior
+
+        frame = ttk.Frame(dialog, padding="10")
+        frame.pack(expand=True, fill=tk.BOTH)
+
+        ttk.Label(frame, text="SMTP Server:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        server_var = tk.StringVar(value=smtp_config.get("server", ""))
+        server_entry = ttk.Entry(frame, width=40, textvariable=server_var)
+        server_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(frame, text="SMTP Port:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        port_var = tk.StringVar(value=str(smtp_config.get("port", "")))
+        port_entry = ttk.Entry(frame, width=10, textvariable=port_var)
+        port_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        ttk.Label(frame, text="SMTP User:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        user_var = tk.StringVar(value=smtp_config.get("user", ""))
+        user_entry = ttk.Entry(frame, width=40, textvariable=user_var)
+        user_entry.grid(row=2, column=1, padx=5, pady=5)
+
+        ttk.Label(frame, text="SMTP Password:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        password_var = tk.StringVar(value=smtp_config.get("password", ""))
+        # TODO: Implement secure password storage instead of plaintext in config, as noted in config_manager.py.
+        password_entry = ttk.Entry(frame, width=40, textvariable=password_var, show="*")
+        password_entry.grid(row=3, column=1, padx=5, pady=5)
+
+        use_tls_var = tk.BooleanVar(value=smtp_config.get("use_tls", True))
+        tls_check = ttk.Checkbutton(frame, text="Use TLS", variable=use_tls_var)
+        tls_check.grid(row=4, column=0, columnspan=2, padx=5, pady=10, sticky="w")
+
+        def validate_port(P):
+            if P == "":
+                return True
+            if P.isdigit() and 0 <= int(P) <= 65535:
+                return True
+            return False
+
+        vcmd = (dialog.register(validate_port), '%P')
+        port_entry.config(validate='key', validatecommand=vcmd)
+
+
+        def on_save():
+            try:
+                port_val = port_var.get()
+                if not port_val: # Default to 0 if empty, though server might reject. Or enforce entry.
+                    messagebox.showerror("Error", "SMTP Port cannot be empty.", parent=dialog)
+                    return
+
+                port_num = int(port_val)
+                if not (0 <= port_num <= 65535):
+                    messagebox.showerror("Error", "Invalid port number. Must be between 0 and 65535.", parent=dialog)
+                    return
+
+                self.config["smtp_settings"]["server"] = server_var.get()
+                self.config["smtp_settings"]["port"] = port_num
+                self.config["smtp_settings"]["user"] = user_var.get()
+                self.config["smtp_settings"]["password"] = password_var.get() # WARNING: Stored in plain text in app_config.json
+                self.config["smtp_settings"]["use_tls"] = use_tls_var.get()
+
+                if config_manager.save_config(self.config):
+                    messagebox.showinfo("Success", "SMTP settings saved.", parent=dialog)
+                    dialog.destroy()
+                else:
+                    messagebox.showerror("Error", "Failed to save SMTP settings.", parent=dialog)
+            except ValueError:
+                messagebox.showerror("Error", "Invalid port number. Please enter a valid number.", parent=dialog)
+            except Exception as e:
+                messagebox.showerror("Error", f"An unexpected error occurred: {e}", parent=dialog)
+
+        def on_cancel():
+            dialog.destroy()
+
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=5, column=0, columnspan=2, pady=10)
+
+        save_button = ttk.Button(button_frame, text="Save", command=on_save)
+        save_button.pack(side=tk.LEFT, padx=5)
+        cancel_button = ttk.Button(button_frame, text="Cancel", command=on_cancel)
+        cancel_button.pack(side=tk.LEFT, padx=5)
+
+        # Center the dialog
+        dialog.update_idletasks()
+        x = self.master.winfo_x() + (self.master.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = self.master.winfo_y() + (self.master.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+        dialog.resizable(False, False)
+
+
     def save_main_config(self):
         """Saves the main configuration details (API key, email)"""
         self.config["gemini_api_key"] = self.api_key_var.get()
