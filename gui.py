@@ -44,10 +44,10 @@ class App:
         self.test_email_recipient_var = tk.StringVar(value=self.config.get("recipient_email", ""))
         self.test_email_recipient_entry = ttk.Entry(test_email_frame, width=40, textvariable=self.test_email_recipient_var)
         self.test_email_recipient_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-
+        
         self.send_test_email_button = ttk.Button(test_email_frame, text="Send Test Email", command=self.send_test_email)
         self.send_test_email_button.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
-
+        
         test_email_frame.columnconfigure(1, weight=1) # Allow entry to expand
 
 
@@ -163,7 +163,7 @@ class App:
         # Ensure current config (especially SMTP settings) is up-to-date
         # self.save_main_config() # Main config (API key, default email) might not be relevant here
         # SMTP settings are directly from self.config or loaded if SMTP dialog was used.
-
+        
         smtp_settings = self.config.get("smtp_settings")
         test_recipient = self.test_email_recipient_var.get().strip()
 
@@ -174,7 +174,7 @@ class App:
         if not smtp_settings or not all(smtp_settings.get(k) for k in ["server", "port", "user"]):
             messagebox.showerror("Error", "SMTP settings are incomplete. Please configure them via 'SMTP Settings'.", parent=self.master)
             return
-
+        
         # Password can be empty for some SMTP setups, so we don't strictly check its presence here,
         # but EmailSender will require it if the server does.
 
@@ -189,7 +189,7 @@ class App:
                 use_tls=smtp_settings.get("use_tls", True),
                 use_ssl=smtp_settings.get("use_ssl", False) # Pass the new SSL setting
             )
-
+            
             subject = "Test Email from Gemini Task Scheduler"
             body_html = """
             <html><body>
@@ -415,7 +415,7 @@ class App:
                 self.config["smtp_settings"]["use_ssl"] = use_ssl_var.get()
 
                 if use_ssl_var.get() and use_tls_var.get():
-                    messagebox.showwarning("SMTP Setting Conflict",
+                    messagebox.showwarning("SMTP Setting Conflict", 
                                            "Both 'Use STARTTLS' and 'Use SSL directly' are selected.\n"
                                            "Direct SSL will be prioritized if both are enabled during sending.\n"
                                            "It's recommended to select only one.",
