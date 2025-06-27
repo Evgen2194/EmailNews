@@ -331,10 +331,11 @@ class App:
                 self.on_task_select()
         self.master.after(1000, self.periodic_update_tasks_display) # Reschedule for the next second
 
-    def stop_scheduler_gui(self):
-        print("DEBUG: gui.py -> stop_scheduler_gui() CALLED") # DEBUG LOG
+    def stop_scheduler_gui(self, silent=False):
+        print(f"DEBUG: gui.py -> stop_scheduler_gui(silent={silent}) CALLED") # DEBUG LOG
         scheduler.stop_scheduler_thread()
-        messagebox.showinfo("Scheduler", "Scheduler stopped.")
+        if not silent:
+            messagebox.showinfo("Scheduler", "Scheduler stopped.")
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.add_task_button.config(state=tk.NORMAL)
@@ -530,6 +531,19 @@ class App:
             self.interval_value_var.set("1") # Reset to default
             self.interval_unit_combobox.set(self.interval_units[0]) # Reset to default
             self.search_internet_var.set(False)
+
+            # If scheduler is running, restart it to include the new task
+            if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
+                print(f"GUI: Scheduler running, restarting to include new task {task_id}")
+                self.stop_scheduler_gui(silent=True) # Stop silently
+                self.start_scheduler_gui(silent=True) # Restart silently
+                # Update button states as start/stop might change them
+                self.start_button.config(state=tk.DISABLED)
+                self.stop_button.config(state=tk.NORMAL)
+                self.add_task_button.config(state=tk.DISABLED)
+                self.remove_task_button.config(state=tk.DISABLED)
+
+
         else:
             messagebox.showerror("Error", "Failed to save task to configuration.")
             
@@ -561,8 +575,15 @@ class App:
                     messagebox.showinfo("Success", "Task removed.")
                     # If scheduler is running, we might need to tell it to update/remove this task
                     if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
-                         scheduler.remove_task(task_id) # Tell running scheduler
-                         print(f"GUI: Instructed running scheduler to remove task {task_id}")
+                         # scheduler.remove_task(task_id) # This is good, but a full restart is safer for consistency
+                         print(f"GUI: Scheduler running, restarting after removing task {task_id}")
+                         self.stop_scheduler_gui(silent=True)
+                         self.start_scheduler_gui(silent=True)
+                         # Update button states as start/stop might change them
+                         self.start_button.config(state=tk.DISABLED)
+                         self.stop_button.config(state=tk.NORMAL)
+                         self.add_task_button.config(state=tk.DISABLED)
+                         self.remove_task_button.config(state=tk.DISABLED)
                 else:
                     messagebox.showerror("Error", "Failed to remove task from configuration.")
         else:
@@ -605,7 +626,7 @@ class App:
                 display_text += " (Net)"
             self.tasks_listbox.insert(tk.END, display_text)
 
-    def start_scheduler_gui(self):
+    def start_scheduler_gui(self, silent=False):
         self.save_main_config() # Save current API key and email before starting
 
         # Ensure self.tasks is up-to-date with the configuration file
@@ -637,7 +658,8 @@ class App:
             current_smtp_config
         )
         print(f"DEBUG: gui.py -> start_scheduler_gui -> Called scheduler.start_scheduler_thread with active_tasks: {active_tasks}")
-        messagebox.showinfo("Scheduler", "Scheduler started with enabled tasks.")
+        if not silent:
+            messagebox.showinfo("Scheduler", "Scheduler started with enabled tasks.")
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
         self.add_task_button.config(state=tk.DISABLED) # Prevent adding tasks while running
