@@ -3,6 +3,7 @@ import time
 import threading
 import schedule
 import datetime # Added for next_run calculations
+import traceback # For detailed error logging
 
 # This will hold the jobs managed by the schedule library
 _jobs = []
@@ -259,11 +260,21 @@ def _run_scheduler():
     print("Scheduler: Scheduler thread started.")
     _stop_event.clear()
     while not _stop_event.is_set():
-        schedule.run_pending()
+        try:
+            schedule.run_pending()
+        except Exception as e:
+            print(f"Scheduler Error: Exception in run_pending loop: {type(e).__name__}: {e}")
+            traceback.print_exc() # Print full traceback to console
+            # Depending on the severity or type of error, we might want to stop the scheduler.
+            # For now, it will log and continue, which might lead to repeated errors if the cause persists.
+            # Consider adding specific error handling or a flag to stop on repeated/critical errors.
         time.sleep(1) # Check for pending jobs every second
-    print("Scheduler: Scheduler thread stopped.")
-    schedule.clear() # Clear all jobs when stopping
-    _jobs.clear()
+
+    # This part is reached when _stop_event is set
+    print("Scheduler: Scheduler thread stopping gracefully.")
+    schedule.clear() # Clear all jobs from the schedule instance
+    _jobs.clear() # Clear our internal list of job objects
+    print("Scheduler: All scheduled jobs cleared.")
 
 
 def start_scheduler_thread(tasks_to_schedule, global_api_key, global_email_to, global_smtp_config):
