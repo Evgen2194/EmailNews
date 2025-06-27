@@ -13,8 +13,8 @@ class GeminiClient:
         if api_key:
             try:
                 genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel('gemini-pro')
-                print(f"GeminiClient initialized and configured with API key.")
+                self.model = genai.GenerativeModel('models/gemini-2.0-flash')
+                print(f"GeminiClient initialized and configured with API key for models/gemini-2.0-flash.")
             except Exception as e:
                 print(f"GeminiClient ERROR: Failed to configure Gemini with API key: {e}")
                 traceback.print_exc()
