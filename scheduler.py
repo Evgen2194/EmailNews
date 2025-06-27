@@ -268,10 +268,20 @@ def _run_scheduler():
             # Depending on the severity or type of error, we might want to stop the scheduler.
             # For now, it will log and continue, which might lead to repeated errors if the cause persists.
             # Consider adding specific error handling or a flag to stop on repeated/critical errors.
+
+        # Detailed log for each loop iteration
+        is_stopped = _stop_event.is_set()
+        num_jobs = len(schedule.jobs)
+        # print(f"Scheduler DEBUG: Loop iteration. stop_event set? {is_stopped}, Current jobs in schedule: {num_jobs}")
+        # Reducing verbosity for now, enable if needed:
+        if num_jobs == 0 and not is_stopped:
+            print(f"Scheduler DEBUG: Loop iteration. stop_event set? {is_stopped}, No jobs in schedule. Next check in 1s.")
+
+
         time.sleep(1) # Check for pending jobs every second
 
     # This part is reached when _stop_event is set
-    print("Scheduler: Scheduler thread stopping gracefully.")
+    print("Scheduler: Scheduler thread stopping gracefully (loop condition met).")
     schedule.clear() # Clear all jobs from the schedule instance
     _jobs.clear() # Clear our internal list of job objects
     print("Scheduler: All scheduled jobs cleared.")
@@ -326,10 +336,12 @@ def start_scheduler_thread(tasks_to_schedule, global_api_key, global_email_to, g
 
 def stop_scheduler_thread():
     """Stops the scheduler thread."""
+    print("DEBUG: scheduler.py -> stop_scheduler_thread() CALLED") # DEBUG LOG
     global _scheduler_thread
     if _scheduler_thread and _scheduler_thread.is_alive():
-        print("Scheduler: Stopping scheduler thread...")
+        print("Scheduler: Attempting to stop scheduler thread...")
         _stop_event.set()
+        print(f"Scheduler DEBUG: _stop_event was set to {_stop_event.is_set()}")
         _scheduler_thread.join(timeout=5) # Wait for the thread to finish
         if _scheduler_thread.is_alive():
             print("Scheduler: Thread did not stop in time.")

@@ -190,6 +190,14 @@ class App:
                 self.on_task_select()
         self.master.after(1000, self.periodic_update_tasks_display) # Reschedule for the next second
 
+    def stop_scheduler_gui(self):
+        print("DEBUG: gui.py -> stop_scheduler_gui() CALLED") # DEBUG LOG
+        scheduler.stop_scheduler_thread()
+        messagebox.showinfo("Scheduler", "Scheduler stopped.")
+        self.start_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED)
+        self.add_task_button.config(state=tk.NORMAL)
+        self.remove_task_button.config(state=tk.NORMAL)
 
     def open_smtp_settings_dialog(self):
         smtp_config = self.config.get("smtp_settings", config_manager.DEFAULT_CONFIG["smtp_settings"].copy())
@@ -481,11 +489,16 @@ class App:
 
     def on_closing(self):
         """Handle window close event."""
+        print("DEBUG: gui.py -> on_closing() CALLED") # DEBUG LOG
         if messagebox.askokcancel("Quit", "Do you want to quit?\nThis will stop the scheduler if it's running."):
+            print("DEBUG: gui.py -> on_closing() - User chose to quit.") # DEBUG LOG
             self.save_main_config() # Save any changes in API key/email
             if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
+                print("DEBUG: gui.py -> on_closing() is calling stop_scheduler_gui()") # DEBUG LOG
                 self.stop_scheduler_gui()
             self.master.destroy()
+        else:
+            print("DEBUG: gui.py -> on_closing() - User cancelled quit.") # DEBUG LOG
 
 
 if __name__ == '__main__':
