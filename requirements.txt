@@ -1,0 +1,14 @@
+# Base requirements - will be expanded
+requests
+schedule
+# For GUI (Tkinter is usually built-in with Python, but good to note)
+# If we were using PyQt5 or PySide6, it would be listed here.
+
+# For system tray icon (example, might change based on implementation)
+# pystray 
+
+# For Gemini API (official library)
+google-generativeai
+
+# Optional: for more robust config/app data paths
+# appdirs
