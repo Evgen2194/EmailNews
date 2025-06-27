@@ -109,7 +109,7 @@ class App:
         # --- Frame for task actions (Enable/Disable) ---
         # Placed below tasks_display_frame (row=3) and above control_frame
         task_actions_frame = ttk.Frame(master)
-        task_actions_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=(5,0), sticky="ew")
+        task_actions_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=(5,0), sticky="ew") 
 
         self.enable_task_button = ttk.Button(task_actions_frame, text="Enable Selected", command=self.enable_selected_task, state=tk.DISABLED)
         self.enable_task_button.pack(side=tk.LEFT, padx=5)
@@ -127,9 +127,9 @@ class App:
 
         self.stop_button = ttk.Button(control_frame, text="Stop Scheduler", command=self.stop_scheduler_gui, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
-
+        
         self.remove_task_button = ttk.Button(control_frame, text="Remove Selected Task", command=self.remove_selected_task)
-        self.remove_task_button.pack(side=tk.LEFT, padx=15)
+        self.remove_task_button.pack(side=tk.LEFT, padx=15) 
         
         master.grid_columnconfigure(1, weight=1) # Allow task list to expand (col 0 is label)
         master.grid_columnconfigure(2, weight=1) # Allow task details to expand
@@ -164,11 +164,11 @@ class App:
             last_sent_str = "N/A"
             if selected_task_data.get("last_sent_time"):
                 try:
-                    from datetime import datetime
+                    from datetime import datetime 
                     dt_obj = datetime.fromisoformat(selected_task_data["last_sent_time"])
                     last_sent_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
                 except ValueError:
-                    last_sent_str = selected_task_data["last_sent_time"]
+                    last_sent_str = selected_task_data["last_sent_time"] 
 
             self.details_last_sent_var.set(f"Last Sent: {last_sent_str}")
             self.details_last_response_text.config(state=tk.NORMAL)
@@ -219,12 +219,12 @@ class App:
 
             if config_manager.update_task_in_config(task_id, updated_task_data):
                 # Refresh local tasks cache directly for consistency before UI update
-                self.tasks = config_manager.get_tasks()
-
+                self.tasks = config_manager.get_tasks() 
+                
                 # Update listbox and selection state for buttons
-                self.update_tasks_listbox()
+                self.update_tasks_listbox() 
                 # Try to reselect the item to update button states, may need index adjustment if list changes
-                self.tasks_listbox.select_set(selected_index)
+                self.tasks_listbox.select_set(selected_index) 
                 self.on_task_select() # Refresh button states based on new task state
 
                 action = "enabled" if enable_flag else "disabled"
