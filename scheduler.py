@@ -68,7 +68,8 @@ def _task_execution_function(task_id, prompt, search_internet, email_to, api_key
                 smtp_port=int(smtp_config["port"]),
                 smtp_user=smtp_config["user"],
                 smtp_password=smtp_config["password"],
-                use_tls=smtp_config.get("use_tls", True)
+                use_tls=smtp_config.get("use_tls", True),
+                use_ssl=smtp_config.get("use_ssl", False) # Pass the new SSL setting
             )
             subject_prefix = "Gemini Task Result"
             if not gemini_interaction_successful:

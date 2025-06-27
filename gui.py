@@ -44,10 +44,10 @@ class App:
         self.test_email_recipient_var = tk.StringVar(value=self.config.get("recipient_email", ""))
         self.test_email_recipient_entry = ttk.Entry(test_email_frame, width=40, textvariable=self.test_email_recipient_var)
         self.test_email_recipient_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-
+        
         self.send_test_email_button = ttk.Button(test_email_frame, text="Send Test Email", command=self.send_test_email)
         self.send_test_email_button.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
-
+        
         test_email_frame.columnconfigure(1, weight=1) # Allow entry to expand
 
 
@@ -163,7 +163,7 @@ class App:
         # Ensure current config (especially SMTP settings) is up-to-date
         # self.save_main_config() # Main config (API key, default email) might not be relevant here
         # SMTP settings are directly from self.config or loaded if SMTP dialog was used.
-
+        
         smtp_settings = self.config.get("smtp_settings")
         test_recipient = self.test_email_recipient_var.get().strip()
 
@@ -174,7 +174,7 @@ class App:
         if not smtp_settings or not all(smtp_settings.get(k) for k in ["server", "port", "user"]):
             messagebox.showerror("Error", "SMTP settings are incomplete. Please configure them via 'SMTP Settings'.", parent=self.master)
             return
-
+        
         # Password can be empty for some SMTP setups, so we don't strictly check its presence here,
         # but EmailSender will require it if the server does.
 
@@ -186,9 +186,10 @@ class App:
                 smtp_port=int(smtp_settings["port"]), # Ensure port is int
                 smtp_user=smtp_settings["user"],
                 smtp_password=smtp_settings.get("password", ""), # Get password, could be empty
-                use_tls=smtp_settings.get("use_tls", True)
+                use_tls=smtp_settings.get("use_tls", True),
+                use_ssl=smtp_settings.get("use_ssl", False) # Pass the new SSL setting
             )
-
+            
             subject = "Test Email from Gemini Task Scheduler"
             body_html = """
             <html><body>
@@ -372,8 +373,16 @@ class App:
         password_entry.grid(row=3, column=1, padx=5, pady=5)
 
         use_tls_var = tk.BooleanVar(value=smtp_config.get("use_tls", True))
-        tls_check = ttk.Checkbutton(frame, text="Use TLS", variable=use_tls_var)
-        tls_check.grid(row=4, column=0, columnspan=2, padx=5, pady=10, sticky="w")
+        tls_check = ttk.Checkbutton(frame, text="Use STARTTLS (e.g., for port 587)", variable=use_tls_var)
+        tls_check.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+
+        use_ssl_var = tk.BooleanVar(value=smtp_config.get("use_ssl", False))
+        ssl_check = ttk.Checkbutton(frame, text="Use SSL directly (e.g., for port 465)", variable=use_ssl_var)
+        ssl_check.grid(row=5, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+
+        # Logic to ensure only one can be selected if they are mutually exclusive
+        # For now, EmailSender prioritizes SSL if both are true, which is a reasonable fallback.
+        # A more interactive UI might disable one when the other is checked.
 
         def validate_port(P):
             if P == "":
@@ -401,8 +410,17 @@ class App:
                 self.config["smtp_settings"]["server"] = server_var.get()
                 self.config["smtp_settings"]["port"] = port_num
                 self.config["smtp_settings"]["user"] = user_var.get()
-                self.config["smtp_settings"]["password"] = password_var.get() # WARNING: Stored in plain text in app_config.json
+                self.config["smtp_settings"]["password"] = password_var.get() # WARNING: Stored in plain text
                 self.config["smtp_settings"]["use_tls"] = use_tls_var.get()
+                self.config["smtp_settings"]["use_ssl"] = use_ssl_var.get()
+
+                if use_ssl_var.get() and use_tls_var.get():
+                    messagebox.showwarning("SMTP Setting Conflict", 
+                                           "Both 'Use STARTTLS' and 'Use SSL directly' are selected.\n"
+                                           "Direct SSL will be prioritized if both are enabled during sending.\n"
+                                           "It's recommended to select only one.",
+                                           parent=dialog)
+                    # No need to return, just inform the user. EmailSender will handle it.
 
                 if config_manager.save_config(self.config):
                     messagebox.showinfo("Success", "SMTP settings saved.", parent=dialog)
