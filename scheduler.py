@@ -91,8 +91,9 @@ def _placeholder_task_function(task_id, prompt, search_internet, email_to, api_k
 def _parse_interval(interval_str):
     """
     Parses an interval string in the format "N unit" (e.g., "5 minutes", "1 hour", "2 days", "3 weeks")
-    and configures a schedule job.
-    Returns a schedule.Job object or None if parsing fails.
+    and configures a schedule object (e.g., schedule.every(N).minutes).
+    This configured schedule object is then returned, ready for a .do() call.
+    Returns a configured schedule.Scheduler object or None if parsing fails.
     
     Supported units: "minutes", "hours", "days", "weeks" (and their singular forms).
     The value N must be a positive integer.
@@ -112,22 +113,26 @@ def _parse_interval(interval_str):
             print(f"Scheduler: Interval value must be a positive integer, got: {value} from '{interval_str}'")
             return None
 
+        # Create a scheduler setup, e.g., schedule.every(value)
+        current_job_setup = schedule.every(value)
+
+        # Then chain the unit method, e.g., current_job_setup.minutes
         if unit in ["minute", "minutes"]:
-            job = job.minutes(value)
+            current_job_setup.minutes
         elif unit in ["hour", "hours"]:
-            job = job.hours(value)
+            current_job_setup.hours
         elif unit in ["day", "days"]:
-            job = job.days(value)
+            current_job_setup.days
             # Note: If specific times for daily tasks (e.g., "every day at 10:00") are needed,
-            # the GUI would need to provide this, and this parser would need to be extended
-            # to handle job.at("HH:MM"). For now, "X days" means "every X days from now".
+            # the GUI would need to provide this, and this parser would need to be extended.
         elif unit in ["week", "weeks"]:
-            job = job.weeks(value)
+            current_job_setup.weeks
         else:
             print(f"Scheduler: Unknown interval unit: '{unit}' in '{interval_str}'. Supported: minutes, hours, days, weeks.")
             return None
 
-        return job
+        return current_job_setup # This is a configured Scheduler object, not a Job yet.
+                                 # .do() will be called on this by the add_task function.
     except ValueError: # Handles non-integer for value
         print(f"Scheduler: Invalid interval number: '{parts[0]}' in '{interval_str}'. Must be an integer.")
         return None
