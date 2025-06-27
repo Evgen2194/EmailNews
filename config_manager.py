@@ -92,7 +92,8 @@ def load_config():
         return json.loads(json.dumps(DEFAULT_CONFIG))
     except Exception as e:
         print(f"ConfigManager: An error occurred loading config: {e}. Using default configuration.")
-        return DEFAULT_CONFIG
+        # Return a deep copy to prevent modification of the global DEFAULT_CONFIG
+        return json.loads(json.dumps(DEFAULT_CONFIG))
 
 def save_config(config_data):
     """Saves the given configuration data to the JSON file."""
