@@ -158,6 +158,16 @@ class App:
         self.clear_task_details() # Initialize details pane
         self.master.after(1000, self.periodic_update_tasks_display) # Start periodic updates for countdowns and details
 
+    # def stop_scheduler_gui(self, silent=False): # Added silent parameter - This is now defined earlier due to merge sequence
+    #     print(f"DEBUG: gui.py -> stop_scheduler_gui(silent={silent}) CALLED")
+    #     scheduler.stop_scheduler_thread()
+    #     if not silent:
+    #         messagebox.showinfo("Scheduler", "Scheduler stopped.")
+    #     self.start_button.config(state=tk.NORMAL)
+    #     self.stop_button.config(state=tk.DISABLED)
+    #     self.add_task_button.config(state=tk.NORMAL)
+    #     self.remove_task_button.config(state=tk.NORMAL)
+
     def send_test_email(self):
         """Sends a test email using the configured SMTP settings."""
         # Ensure current config (especially SMTP settings) is up-to-date
@@ -302,8 +312,8 @@ class App:
                 # If scheduler is running, restart it to apply changes
                 if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
                     print(f"GUI: Scheduler running, restarting to apply task enable/disable changes for task {task_id}")
-                    self.stop_scheduler_gui()
-                    self.start_scheduler_gui()
+                    self.stop_scheduler_gui(silent=True) # Pass silent
+                    self.start_scheduler_gui(silent=True) # Pass silent
             else:
                 messagebox.showerror("Error", f"Failed to update task '{task_to_modify['prompt'][:30]}...' state.")
         else:
@@ -532,17 +542,72 @@ class App:
             self.interval_unit_combobox.set(self.interval_units[0]) # Reset to default
             self.search_internet_var.set(False)
 
-            # If scheduler is running, restart it to include the new task
-            if scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive():
-                print(f"GUI: Scheduler running, restarting to include new task {task_id}")
-                self.stop_scheduler_gui(silent=True) # Stop silently
-                self.start_scheduler_gui(silent=True) # Restart silently
-                # Update button states as start/stop might change them
-                self.start_button.config(state=tk.DISABLED)
-                self.stop_button.config(state=tk.NORMAL)
-                self.add_task_button.config(state=tk.DISABLED)
-                self.remove_task_button.config(state=tk.DISABLED)
+            # --- Immediate Execution and Scheduling ---
+            print(f"GUI: Task '{task_id}' added. Attempting immediate run and scheduling.")
+            # Ensure global configs are current for the scheduler
+            current_api_key = self.api_key_var.get()
+            current_email_to = self.email_var.get()
+            current_smtp_config = self.config.get("smtp_settings", {})
 
+            # Call the new scheduler function
+            # This function will run the task once, then add it to the schedule
+            task_executed_immediately = scheduler.run_task_now_and_schedule(
+                new_task, # The task data
+                current_api_key,
+                current_email_to, # Default recipient for this task execution
+                current_smtp_config
+            )
+
+            if task_executed_immediately:
+                print(f"GUI: Task '{task_id}' executed immediately and scheduled.")
+                # Refresh task list to show updated status (last run, etc.)
+                self.update_tasks_listbox()
+                # If a task was selected, its details might need an update.
+                # Re-selecting the newly added task could be an option, or just refresh all.
+                # For now, a general update_tasks_listbox should refresh countdowns.
+                # To update details like "Last Sent", we might need to refresh self.tasks from config
+                # and then call on_task_select if the new task is made active.
+                # Let's ensure self.tasks is fresh before updating listbox.
+                self.tasks = config_manager.get_tasks() # Refresh local cache
+                self.update_tasks_listbox()
+
+                # If the scheduler wasn't running, and we just added+ran a task,
+                # it's now scheduled. If it *was* running, run_task_now_and_schedule
+                # should have added it to the existing schedule.
+                if not (scheduler._scheduler_thread and scheduler._scheduler_thread.is_alive()):
+                    # If scheduler was stopped, and we added a task, it's now in schedule's list
+                    # but the scheduler thread itself isn't running.
+                    # We might want to auto-start it, or rely on the user to press "Start Scheduler".
+                    # For now, let's assume if it was stopped, it remains stopped, but the task is ready.
+                    print("GUI: Scheduler was not running. Task is scheduled but scheduler needs to be started manually if desired.")
+                    # The start/stop buttons states should reflect this.
+                    # If there are tasks, start should be enabled.
+                    if self.tasks: # Check if any tasks exist
+                         self.start_button.config(state=tk.NORMAL)
+                    self.stop_button.config(state=tk.DISABLED)
+                    self.add_task_button.config(state=tk.NORMAL) # Can still add more tasks
+                    self.remove_task_button.config(state=tk.NORMAL)
+
+                else: # Scheduler is already running
+                    print(f"GUI: Scheduler already running. Task '{task_id}' added to existing schedule.")
+                    # Button states should remain as "scheduler running"
+                    self.start_button.config(state=tk.DISABLED)
+                    self.stop_button.config(state=tk.NORMAL)
+                    # Temporarily disable add/remove while scheduler is active, as per original logic
+                    # This part might need refinement if we want to add tasks to a live scheduler
+                    # without a full restart, which run_task_now_and_schedule aims to support.
+                    # The original logic was to disable these, let's see if that's still best.
+                    # For now, let's re-enable them as we are not restarting the whole scheduler.
+                    self.add_task_button.config(state=tk.NORMAL)
+                    self.remove_task_button.config(state=tk.NORMAL)
+
+
+            else:
+                # This 'else' handles if run_task_now_and_schedule itself reported a failure
+                # (e.g., couldn't parse interval for scheduling part).
+                # _task_execution_function handles its own errors internally for the immediate run.
+                messagebox.showerror("Error", f"Task '{prompt[:30]}...' was added to config, but failed to schedule properly. Check logs.")
+                self.update_tasks_listbox() # Still update listbox to show the added task
 
         else:
             messagebox.showerror("Error", "Failed to save task to configuration.")
@@ -626,7 +691,7 @@ class App:
                 display_text += " (Net)"
             self.tasks_listbox.insert(tk.END, display_text)
 
-    def start_scheduler_gui(self, silent=False):
+    def start_scheduler_gui(self, silent=False): # Added silent parameter
         self.save_main_config() # Save current API key and email before starting
 
         # Ensure self.tasks is up-to-date with the configuration file
@@ -647,8 +712,9 @@ class App:
         
         active_tasks = [task for task in self.tasks if task.get("enabled", True)]
         if not active_tasks:
-            messagebox.showinfo("Info", "No enabled tasks to schedule.")
-            return
+            if not silent: # Only show message if not silent
+                messagebox.showinfo("Info", "No enabled tasks to schedule.")
+            return # Return in both cases if no active tasks
             
         # Pass only enabled tasks to the scheduler
         scheduler.start_scheduler_thread(
@@ -658,17 +724,20 @@ class App:
             current_smtp_config
         )
         print(f"DEBUG: gui.py -> start_scheduler_gui -> Called scheduler.start_scheduler_thread with active_tasks: {active_tasks}")
-        if not silent:
+        if not silent: # Only show message if not silent
             messagebox.showinfo("Scheduler", "Scheduler started with enabled tasks.")
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
-        self.add_task_button.config(state=tk.DISABLED) # Prevent adding tasks while running
-        self.remove_task_button.config(state=tk.DISABLED) # Prevent removing tasks while running
+        # With run_task_now_and_schedule, we might allow adding/removing tasks while scheduler is running
+        # For now, keeping the original logic of disabling them.
+        self.add_task_button.config(state=tk.DISABLED)
+        self.remove_task_button.config(state=tk.DISABLED)
 
 
-    def stop_scheduler_gui(self):
+    def stop_scheduler_gui(self, silent=False): # Ensure this matches the definition used earlier
         scheduler.stop_scheduler_thread()
-        messagebox.showinfo("Scheduler", "Scheduler stopped.")
+        if not silent: # Only show message if not silent
+            messagebox.showinfo("Scheduler", "Scheduler stopped.")
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.add_task_button.config(state=tk.NORMAL)
