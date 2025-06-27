@@ -21,23 +21,32 @@ class GeminiClient:
         Simulates getting a response from Gemini.
         If search_internet is True, it simulates an internet search first.
         """
-        print(f"GeminiClient: Received prompt: '{prompt}', Search Internet: {search_internet}")
+        print(f"GeminiClient INFO: Received prompt for Gemini: '{prompt}', Search Internet: {search_internet}")
 
         if not self.api_key:
-            return "Error: API Key not configured for GeminiClient."
+            error_message = "Error: API Key not configured for GeminiClient."
+            print(f"GeminiClient ERROR: Failed to get response. Reason: {error_message}")
+            return error_message
 
         # Simulate network delay and processing
+        print("GeminiClient INFO: Simulating call to Gemini API...")
         time.sleep(1) 
+
+        # Simulate a potential error during API call for testing logging
+        # if "error_test" in prompt.lower():
+        #     error_message = "Simulated API error from Gemini."
+        #     print(f"GeminiClient ERROR: Failed to get response from Gemini. Reason: {error_message}")
+        #     return f"Error: {error_message}"
 
         simulated_response = f"Simulated Gemini response for: '{prompt}'."
 
         if search_internet:
-            print("GeminiClient: Simulating internet search...")
+            print("GeminiClient INFO: Simulating internet search as part of Gemini interaction...")
             time.sleep(0.5) # Simulate search delay
             search_result = f"Simulated internet search result for '{prompt}'."
             simulated_response = f"{search_result}\n\n{simulated_response}"
         
-        print(f"GeminiClient: Sending back: '{simulated_response}'")
+        print(f"GeminiClient SUCCESS: Successfully received simulated response from Gemini: '{simulated_response}'")
         return simulated_response
 
 if __name__ == '__main__':
